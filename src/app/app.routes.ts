@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { Home } from './pages/home/home';
+import { Editor } from './pages/editor/editor';
 
 export const routes: Routes = [
   {
@@ -7,12 +8,7 @@ export const routes: Routes = [
     component: Home
   },
   {
-    path: '',
-    pathMatch: 'full',
-    redirectTo: 'home'
+    path: 'editor',
+    component: Editor
   },
-  {
-    path: '**',
-    redirectTo: 'home'
-  }
 ];
