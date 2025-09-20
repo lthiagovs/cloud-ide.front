@@ -1,6 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { finalize, Subject, takeUntil } from 'rxjs';
+import { AuthService, LoginData, RegisterData } from '../../services/auth.service';
 
 interface LoginForm {
   email: string;
@@ -9,8 +12,7 @@ interface LoginForm {
 }
 
 interface RegisterForm {
-  firstName: string;
-  lastName: string;
+  username: string;  // Apenas um campo nome (username)
   email: string;
   password: string;
   confirmPassword: string;
@@ -24,13 +26,17 @@ interface RegisterForm {
   standalone: true,
   imports: [CommonModule, FormsModule]
 })
-export class Auth implements OnInit {
+export class Auth implements OnInit, OnDestroy {
+  
+  private destroy$ = new Subject<void>();
   
   currentMode: 'login' | 'register' = 'login';
   isLoading = false;
   showSuccess = false;
+  showError = false;
   successTitle = '';
   successMessage = '';
+  errorMessage = '';
 
   loginForm: LoginForm = {
     email: '',
@@ -39,77 +45,191 @@ export class Auth implements OnInit {
   };
 
   registerForm: RegisterForm = {
-    firstName: '',
-    lastName: '',
+    username: '',  // Apenas username
     email: '',
     password: '',
     confirmPassword: '',
     acceptTerms: false
   };
 
-  constructor() { }
+  constructor(
+    private authService: AuthService,
+    private cdr: ChangeDetectorRef,
+    private router: Router
+  ) { 
+    console.log('Auth Component construído');
+    console.log('AuthService injetado:', !!this.authService);
+  }
 
   ngOnInit(): void {
-    // Inicialização do componente
+    console.log('Auth Component iniciado');
+    
+    // Verificar se o usuário já está autenticado
+    this.authService.isAuthenticated$.pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (isAuthenticated) => {
+        console.log('Estado de autenticação:', isAuthenticated);
+        if (isAuthenticated) {
+          console.log('Usuário já está autenticado');
+        }
+      },
+      error: (error) => {
+        console.error('Erro ao verificar autenticação:', error);
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   switchMode(mode: 'login' | 'register'): void {
     this.currentMode = mode;
     this.clearForms();
+    this.clearMessages();
   }
 
   onLogin(): void {
-    if (!this.validateLoginForm()) {
-      return;
-    }
+    if (!this.validateLoginForm()) return;
 
+    console.log('Iniciando processo de login');
+    console.log('Estado antes do login - isLoading:', this.isLoading);
     this.isLoading = true;
+    this.clearMessages();
+    
+    // Força a detecção da mudança
+    this.cdr.detectChanges();
+    console.log('Loading ativado no login, estado atual:', this.isLoading);
 
-    // Simular chamada de API
-    setTimeout(() => {
-      this.isLoading = false;
-      this.successTitle = 'Login realizado com sucesso!';
-      this.successMessage = `Bem-vindo de volta, ${this.loginForm.email}! Redirecionando para o editor...`;
-      this.showSuccess = true;
+    const loginData: LoginData = {
+      email: this.loginForm.email.trim(),
+      password: this.loginForm.password
+    };
 
-      // Simular redirecionamento após 3 segundos
-      setTimeout(() => {
-        this.showSuccess = false;
-        console.log('Redirecionando para o dashboard...');
-        // Aqui seria feito o redirecionamento real
-      }, 3000);
-
-    }, 2000);
+    this.authService.login(loginData).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (response) => {
+        console.log('Login bem-sucedido, parando loading');
+        
+        // Para o loading
+        this.isLoading = false;
+        console.log('Loading parado no login, estado atual:', this.isLoading);
+        
+        // Força a detecção da mudança
+        this.cdr.detectChanges();
+        
+        // Exibe mensagem de sucesso
+        this.successTitle = 'Autenticação realizada com sucesso!';
+        this.successMessage = `Bem-vindo de volta! Redirecionando...`;
+        this.showSuccess = true;
+        
+        // Limpa o formulário
+        this.clearForms();
+        
+        // Redireciona para /profile após 1.5 segundos para mostrar a mensagem
+        setTimeout(() => {
+          this.showSuccess = false;
+          console.log('Redirecionando para /profile...');
+          this.router.navigate(['/profile']);
+        }, 1500);
+      },
+      error: (error) => {
+        console.log('Erro no login, parando loading');
+        
+        // Para o loading
+        this.isLoading = false;
+        console.log('Loading parado após erro no login, estado atual:', this.isLoading);
+        
+        // Força a detecção da mudança
+        this.cdr.detectChanges();
+        
+        this.errorMessage = error.message || 'Erro ao fazer login. Verifique suas credenciais.';
+        this.showError = true;
+      }
+    });
   }
 
   onRegister(): void {
+    console.log('Iniciando processo de registro');
+
     if (!this.validateRegisterForm()) {
       return;
     }
 
+    console.log('Estado antes do registro - isLoading:', this.isLoading);
     this.isLoading = true;
+    this.clearMessages();
+    
+    // Força a detecção da mudança
+    this.cdr.detectChanges();
+    console.log('Loading ativado, estado atual:', this.isLoading);
 
-    // Simular chamada de API
-    setTimeout(() => {
-      this.isLoading = false;
-      this.successTitle = 'Conta criada com sucesso!';
-      this.successMessage = `Olá ${this.registerForm.firstName}! Sua conta foi criada. Enviamos um email de confirmação para ${this.registerForm.email}`;
-      this.showSuccess = true;
+    const registerData: RegisterData = {
+      username: this.registerForm.username.trim(),
+      email: this.registerForm.email.trim(),
+      password: this.registerForm.password
+    };
 
-      // Simular redirecionamento após 4 segundos
-      setTimeout(() => {
-        this.showSuccess = false;
-        this.switchMode('login');
-        console.log('Conta criada, mudando para login...');
-      }, 4000);
+    console.log('Enviando dados de registro:', {
+      username: registerData.username,
+      email: registerData.email,
+      password: '***'
+    });
 
-    }, 2500);
+    this.authService.register(registerData).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (response) => {
+        console.log('Registro bem-sucedido, parando loading');
+        
+        // Para o loading
+        this.isLoading = false;
+        console.log('Loading parado, estado atual:', this.isLoading);
+        
+        // Força a detecção da mudança
+        this.cdr.detectChanges();
+        
+        // Define mensagem de sucesso
+        this.successTitle = 'Conta criada com sucesso!';
+        this.successMessage = `Olá ${this.registerForm.username}! Sua conta foi criada.`;
+        this.showSuccess = true;
+        
+        this.clearForms();
+
+        setTimeout(() => {
+          this.showSuccess = false;
+          this.switchMode('login');
+        }, 3000);
+      },
+      error: (error) => {
+        console.log('Erro no registro, parando loading');
+        
+        // Para o loading
+        this.isLoading = false;
+        console.log('Loading parado após erro, estado atual:', this.isLoading);
+        
+        // Força a detecção da mudança
+        this.cdr.detectChanges();
+        
+        this.errorMessage = error.message || 'Erro ao criar conta. Tente novamente.';
+        this.showError = true;
+      }
+    });
   }
 
   showForgotPassword(): void {
-    // Simular modal de recuperação de senha
     const email = prompt('Digite seu email para recuperação de senha:');
     if (email) {
+      if (!this.isValidEmail(email)) {
+        this.errorMessage = 'Por favor, insira um email válido.';
+        this.showError = true;
+        return;
+      }
+
+      // Simulação - em uma implementação real, você criaria um método no AuthService
       this.successTitle = 'Email de recuperação enviado!';
       this.successMessage = `Enviamos instruções para ${email}. Verifique sua caixa de entrada.`;
       this.showSuccess = true;
@@ -121,33 +241,13 @@ export class Auth implements OnInit {
   }
 
   loginWithGoogle(): void {
-    this.isLoading = true;
-    
-    setTimeout(() => {
-      this.isLoading = false;
-      this.successTitle = 'Login com Google realizado!';
-      this.successMessage = 'Autenticação com Google bem-sucedida. Configurando sua conta...';
-      this.showSuccess = true;
-
-      setTimeout(() => {
-        this.showSuccess = false;
-      }, 3000);
-    }, 1500);
+    this.errorMessage = 'Login com Google será implementado em breve.';
+    this.showError = true;
   }
 
   loginWithGithub(): void {
-    this.isLoading = true;
-    
-    setTimeout(() => {
-      this.isLoading = false;
-      this.successTitle = 'Login com GitHub realizado!';
-      this.successMessage = 'Autenticação com GitHub bem-sucedida. Importando seus repositórios...';
-      this.showSuccess = true;
-
-      setTimeout(() => {
-        this.showSuccess = false;
-      }, 3000);
-    }, 1500);
+    this.errorMessage = 'Login com GitHub será implementado em breve.';
+    this.showError = true;
   }
 
   getPasswordStrength(): string {
@@ -187,30 +287,43 @@ export class Auth implements OnInit {
 
   isRegisterValid(): boolean {
     return !!(
-      this.registerForm.firstName &&
-      this.registerForm.lastName &&
+      this.registerForm.username &&
       this.registerForm.email &&
       this.registerForm.password &&
       this.registerForm.confirmPassword &&
       this.registerForm.acceptTerms &&
       this.registerForm.password === this.registerForm.confirmPassword &&
-      this.registerForm.password.length >= 6
+      this.registerForm.password.length >= 6 &&
+      this.registerForm.username.length >= 3 &&
+      this.isValidEmail(this.registerForm.email) &&
+      this.isValidUsername(this.registerForm.username)
     );
+  }
+
+  dismissError(): void {
+    this.showError = false;
+    this.errorMessage = '';
+  }
+
+  dismissSuccess(): void {
+    this.showSuccess = false;
+    this.successTitle = '';
+    this.successMessage = '';
   }
 
   private validateLoginForm(): boolean {
     if (!this.loginForm.email) {
-      alert('Por favor, insira seu email.');
+      this.showErrorMessage('Por favor, insira seu email.');
       return false;
     }
 
     if (!this.loginForm.password) {
-      alert('Por favor, insira sua senha.');
+      this.showErrorMessage('Por favor, insira sua senha.');
       return false;
     }
 
     if (!this.isValidEmail(this.loginForm.email)) {
-      alert('Por favor, insira um email válido.');
+      this.showErrorMessage('Por favor, insira um email válido.');
       return false;
     }
 
@@ -218,43 +331,53 @@ export class Auth implements OnInit {
   }
 
   private validateRegisterForm(): boolean {
-    if (!this.registerForm.firstName) {
-      alert('Por favor, insira seu nome.');
+    if (!this.registerForm.username) {
+      this.showErrorMessage('Por favor, insira um nome de usuário.');
       return false;
     }
 
-    if (!this.registerForm.lastName) {
-      alert('Por favor, insira seu sobrenome.');
+    if (this.registerForm.username.length < 3) {
+      this.showErrorMessage('Nome de usuário deve ter pelo menos 3 caracteres.');
+      return false;
+    }
+
+    if (this.registerForm.username.length > 20) {
+      this.showErrorMessage('Nome de usuário deve ter no máximo 20 caracteres.');
+      return false;
+    }
+
+    if (!this.isValidUsername(this.registerForm.username)) {
+      this.showErrorMessage('Nome de usuário deve conter apenas letras, números e underscore.');
       return false;
     }
 
     if (!this.registerForm.email) {
-      alert('Por favor, insira seu email.');
+      this.showErrorMessage('Por favor, insira seu email.');
       return false;
     }
 
     if (!this.isValidEmail(this.registerForm.email)) {
-      alert('Por favor, insira um email válido.');
+      this.showErrorMessage('Por favor, insira um email válido.');
       return false;
     }
 
     if (!this.registerForm.password) {
-      alert('Por favor, insira uma senha.');
+      this.showErrorMessage('Por favor, insira uma senha.');
       return false;
     }
 
     if (this.registerForm.password.length < 6) {
-      alert('A senha deve ter pelo menos 6 caracteres.');
+      this.showErrorMessage('A senha deve ter pelo menos 6 caracteres.');
       return false;
     }
 
     if (this.registerForm.password !== this.registerForm.confirmPassword) {
-      alert('As senhas não coincidem.');
+      this.showErrorMessage('As senhas não coincidem.');
       return false;
     }
 
     if (!this.registerForm.acceptTerms) {
-      alert('Você deve aceitar os termos de uso.');
+      this.showErrorMessage('Você deve aceitar os termos de uso.');
       return false;
     }
 
@@ -266,6 +389,11 @@ export class Auth implements OnInit {
     return emailRegex.test(email);
   }
 
+  private isValidUsername(username: string): boolean {
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    return usernameRegex.test(username);
+  }
+
   private clearForms(): void {
     this.loginForm = {
       email: '',
@@ -274,12 +402,24 @@ export class Auth implements OnInit {
     };
 
     this.registerForm = {
-      firstName: '',
-      lastName: '',
+      username: '',
       email: '',
       password: '',
       confirmPassword: '',
       acceptTerms: false
     };
+  }
+
+  private clearMessages(): void {
+    this.showError = false;
+    this.showSuccess = false;
+    this.errorMessage = '';
+    this.successTitle = '';
+    this.successMessage = '';
+  }
+
+  private showErrorMessage(message: string): void {
+    this.errorMessage = message;
+    this.showError = true;
   }
 }

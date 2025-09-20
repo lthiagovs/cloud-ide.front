@@ -21,4 +21,9 @@ export const routes: Routes = [
     path: 'profile',
     component: Profile
   },
+  {
+    path: '**',
+    redirectTo: 'home',
+    pathMatch: 'full'
+  },
 ];
